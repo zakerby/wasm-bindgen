@@ -4,6 +4,7 @@ use std::mem;
 
 use parity_wasm::elements::*;
 use parity_wasm;
+use serde_json;
 use shared;
 use wasm_gc;
 
@@ -28,6 +29,7 @@ pub struct Context<'a> {
     pub exported_classes: HashMap<String, ExportedClass>,
     pub function_table_needed: bool,
     pub run_descriptor: &'a Fn(&str) -> Vec<u32>,
+    pub module_versions: Vec<(String, String)>,
 }
 
 #[derive(Default)]
@@ -336,6 +338,7 @@ impl<'a> Context<'a> {
 
         self.export_table();
         self.gc();
+        self.add_wasm_pack_section();
 
         while js.contains("\n\n\n") {
             js = js.replace("\n\n\n", "\n\n");
@@ -1295,6 +1298,28 @@ impl<'a> Context<'a> {
         self.globals.push_str(s);
         self.globals.push_str("\n");
     }
+
+    fn add_wasm_pack_section(&mut self) {
+        if self.module_versions.len() == 0 {
+            return
+        }
+
+        #[derive(Serialize)]
+        struct WasmPackSchema<'a> {
+            version: &'a str,
+            modules: &'a [(String, String)],
+        }
+
+        let contents = serde_json::to_string(&WasmPackSchema {
+            version: "0.0.1",
+            modules: &self.module_versions,
+        }).unwrap();
+
+        let mut section = CustomSection::default();
+        *section.name_mut() = "__wasm_pack_unstable".to_string();
+        *section.payload_mut() = contents.into_bytes();
+        self.module.sections_mut().push(Section::Custom(section));
+    }
 }
 
 impl<'a, 'b> SubContext<'a, 'b> {
@@ -1371,6 +1396,12 @@ impl<'a, 'b> SubContext<'a, 'b> {
     }
 
     pub fn generate_import(&mut self, import: &shared::Import) {
+        match (&import.module, &import.version) {
+            (Some(m), Some(v)) => {
+                self.cx.module_versions.push((m.clone(), v.clone()));
+            }
+            _ => {}
+        }
         match import.kind {
             shared::ImportKind::Function(ref f) => {
                 self.generate_import_function(import, f)

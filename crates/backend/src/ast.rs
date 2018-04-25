@@ -20,6 +20,7 @@ pub struct Export {
 
 pub struct Import {
     pub module: Option<String>,
+    pub version: Option<String>,
     pub js_namespace: Option<syn::Ident>,
     pub kind: ImportKind,
 }
@@ -294,6 +295,7 @@ impl Program {
                 BindgenAttrs::find(attrs)
             };
             let module = item_opts.module().or(opts.module()).map(|s| s.to_string());
+            let version = item_opts.version().or(opts.version()).map(|s| s.to_string());
             let js_namespace = item_opts.js_namespace().or(opts.js_namespace());
             let mut kind = match item {
                 syn::ForeignItem::Fn(f) => self.push_foreign_fn(f, item_opts),
@@ -304,6 +306,7 @@ impl Program {
 
             self.imports.push(Import {
                 module,
+                version,
                 js_namespace,
                 kind,
             });
@@ -586,6 +589,7 @@ impl Import {
     fn shared(&self) -> shared::Import {
         shared::Import {
             module: self.module.clone(),
+            version: self.version.clone(),
             js_namespace: self.js_namespace.map(|s| s.as_ref().to_string()),
             kind: self.kind.shared(),
         }
@@ -746,6 +750,16 @@ impl BindgenAttrs {
             .next()
     }
 
+    fn version(&self) -> Option<&str> {
+        self.attrs
+            .iter()
+            .filter_map(|a| match *a {
+                BindgenAttr::Version(ref s) => Some(&s[..]),
+                _ => None,
+            })
+            .next()
+    }
+
     pub fn catch(&self) -> bool {
         self.attrs.iter().any(|a| match *a {
             BindgenAttr::Catch => true,
@@ -844,6 +858,7 @@ enum BindgenAttr {
     Method,
     JsNamespace(syn::Ident),
     Module(String),
+    Version(String),
     Getter(Option<syn::Ident>),
     Setter(Option<syn::Ident>),
     Structural,
@@ -896,6 +911,13 @@ impl syn::synom::Synom for BindgenAttr {
             s: syn!(syn::LitStr) >>
             (s.value())
         )=> { BindgenAttr::Module }
+        |
+        do_parse!(
+            call!(term, "version") >>
+            punct!(=) >>
+            s: syn!(syn::LitStr) >>
+            (s.value())
+        )=> { BindgenAttr::Version }
         |
         do_parse!(
             call!(term, "js_name") >>
